@@ -1,0 +1,12 @@
+{
+	"name": "AzureKeyVault",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"description": "Azure Key Vault connection with datasvcmo-dev-kv",
+		"annotations": [],
+		"type": "AzureKeyVault",
+		"typeProperties": {
+			"baseUrl": "https://datasvcmo-dev-kv.vault.azure.net/"
+		}
+	}
+}

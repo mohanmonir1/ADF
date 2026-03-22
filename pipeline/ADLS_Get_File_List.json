@@ -1,0 +1,279 @@
+{
+	"name": "ADLS_Get_File_List",
+	"properties": {
+		"activities": [
+			{
+				"name": "Set_ExtractTableName",
+				"description": "Set the ExtractTableName variable to the name of the table being extracted",
+				"type": "SetVariable",
+				"dependsOn": [],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "ExtractTableName",
+					"value": {
+						"value": "@last(take(split(pipeline().parameters.SourceDirectory,'/'),2))",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Delete Old Records",
+				"description": "Deletes all the records in the target table",
+				"type": "Script",
+				"dependsOn": [
+					{
+						"activity": "Set_ExtractTableName",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:30:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"linkedServiceName": {
+					"referenceName": "LS_AzSQLDB_CostSavings_DB_01",
+					"type": "LinkedServiceReference"
+				},
+				"typeProperties": {
+					"scripts": [
+						{
+							"type": "Query",
+							"text": {
+								"value": "@concat('DELETE FROM ',pipeline().parameters.TargetSchema,'.',pipeline().parameters.TargetTable,' WHERE name LIKE ''%',variables('ExtractTableName'),'%'';')",
+								"type": "Expression"
+							}
+						}
+					],
+					"scriptBlockExecutionTimeout": "02:00:00"
+				}
+			},
+			{
+				"name": "Until no continuation token exists",
+				"description": "Continue requesting more records until a continuation token is not included in the API response's headers.",
+				"type": "Until",
+				"dependsOn": [
+					{
+						"activity": "Delete Old Records",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@empty(variables('ContinuationToken'))",
+						"type": "Expression"
+					},
+					"activities": [
+						{
+							"name": "Copy File List",
+							"type": "Copy",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.1:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "RestSource",
+									"httpRequestTimeout": "00:01:40",
+									"requestInterval": "00.00:00:00.010",
+									"requestMethod": "GET",
+									"paginationRules": {
+										"supportRFC5988": "true"
+									}
+								},
+								"sink": {
+									"type": "AzureSqlSink",
+									"writeBehavior": "insert",
+									"sqlWriterUseTableLock": false
+								},
+								"enableStaging": false,
+								"translator": {
+									"type": "TabularTranslator",
+									"mappings": [
+										{
+											"source": {
+												"path": "['contentLength']"
+											},
+											"sink": {
+												"name": "contentlength",
+												"type": "Int64"
+											}
+										},
+										{
+											"source": {
+												"path": "['isDirectory']"
+											},
+											"sink": {
+												"name": "isDirectory",
+												"type": "Boolean"
+											}
+										},
+										{
+											"source": {
+												"path": "['lastModified']"
+											},
+											"sink": {
+												"name": "lastmodified",
+												"type": "DateTime"
+											}
+										},
+										{
+											"source": {
+												"path": "['name']"
+											},
+											"sink": {
+												"name": "name",
+												"type": "String"
+											}
+										}
+									],
+									"collectionReference": "$['paths']",
+									"mapComplexValuesToString": false
+								}
+							},
+							"inputs": [
+								{
+									"referenceName": "DS_RESTAPI_ADLS",
+									"type": "DatasetReference",
+									"parameters": {
+										"Directory": {
+											"value": "@pipeline().parameters.SourceDirectory",
+											"type": "Expression"
+										},
+										"SourceContainer": {
+											"value": "@pipeline().parameters.SourceContainer",
+											"type": "Expression"
+										},
+										"Continuation": {
+											"value": "@variables('ContinuationToken')",
+											"type": "Expression"
+										}
+									}
+								}
+							],
+							"outputs": [
+								{
+									"referenceName": "DS_AzSQLDB_REST",
+									"type": "DatasetReference",
+									"parameters": {
+										"SchemaName": {
+											"value": "@pipeline().parameters.TargetSchema",
+											"type": "Expression"
+										},
+										"TableName": {
+											"value": "@pipeline().parameters.TargetTable",
+											"type": "Expression"
+										}
+									}
+								}
+							]
+						},
+						{
+							"name": "Get Continuation Token",
+							"description": "calls the api to obtain the continuation token needed for the following copy activity.",
+							"type": "WebActivity",
+							"dependsOn": [
+								{
+									"activity": "Copy File List",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.1:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "GET",
+								"url": {
+									"value": "https://datasvcmodevadls.dfs.core.windows.net/@{pipeline().parameters.SourceContainer}?directory=@{pipeline().parameters.SourceDirectory}@{if(not(empty(variables('ContinuationToken'))),concat('&continuation=',variables('ContinuationToken')),'')}&recursive=true&resource=filesystem",
+									"type": "Expression"
+								},
+								"authentication": {
+									"type": "MSI",
+									"resource": "https://storage.azure.com"
+								}
+							}
+						},
+						{
+							"name": "Set Continuation Token",
+							"type": "SetVariable",
+							"dependsOn": [
+								{
+									"activity": "Get Continuation Token",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "ContinuationToken",
+								"value": {
+									"value": "@if(contains(activity('Get Continuation Token').output.ADFWebActivityResponseHeaders,'x-ms-continuation'),uriComponent(activity('Get Continuation Token').output.ADFWebActivityResponseHeaders['x-ms-continuation']),null)",
+									"type": "Expression"
+								}
+							}
+						}
+					],
+					"timeout": "0.1:00:00"
+				}
+			}
+		],
+		"parameters": {
+			"SourceDirectory": {
+				"type": "string",
+				"defaultValue": "topics"
+			},
+			"SourceContainer": {
+				"type": "string",
+				"defaultValue": "landingzone"
+			},
+			"TargetTable": {
+				"type": "string",
+				"defaultValue": "tblFileNames"
+			},
+			"TargetSchema": {
+				"type": "string",
+				"defaultValue": "temp"
+			}
+		},
+		"variables": {
+			"ContinuationToken": {
+				"type": "String"
+			},
+			"ExtractTableName": {
+				"type": "String"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2026-03-15T12:35:52Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

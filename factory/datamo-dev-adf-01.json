@@ -1,0 +1,9 @@
+{
+	"name": "datamo-dev-adf-01",
+	"location": "centralindia",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "3a1c1cce-f154-4766-8833-05a814d80ada",
+		"tenantId": "8efa0ba3-28e2-4f35-a49f-f86559e9efd7"
+	}
+}

@@ -1,0 +1,150 @@
+{
+	"name": "KFK_FileExtract_CopyAllFiles_RunAll_PL",
+	"properties": {
+		"activities": [
+			{
+				"name": "LookupObjectsActivity",
+				"description": "Calls a stored proc to get the objects to be loaded from the state tables.",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.00:30:00",
+					"retry": 2,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderStoredProcedureName": "[state].[GetObjectList]",
+						"storedProcedureParameters": {
+							"databaseName": {
+								"type": "String",
+								"value": {
+									"value": "@pipeline().parameters.SourceContainer",
+									"type": "Expression"
+								}
+							},
+							"loadGroup": {
+								"type": "Int32",
+								"value": {
+									"value": "@pipeline().parameters.LoadGroup",
+									"type": "Expression"
+								}
+							},
+							"serverName": {
+								"type": "String",
+								"value": {
+									"value": "@pipeline().parameters.StorageAccount",
+									"type": "Expression"
+								}
+							}
+						},
+						"queryTimeout": "00:05:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "DS_AzSQLDB_StateDB",
+						"type": "DatasetReference"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "ForEachActivity",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "LookupObjectsActivity",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('LookupObjectsActivity').output.value",
+						"type": "Expression"
+					},
+					"batchCount": 5,
+					"activities": [
+						{
+							"name": "ExecutePipelineActivity",
+							"type": "ExecutePipeline",
+							"dependsOn": [],
+							"policy": {
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"pipeline": {
+									"referenceName": "KFK_FileExtract_CopyAllFiles_PL",
+									"type": "PipelineReference"
+								},
+								"waitOnCompletion": true,
+								"parameters": {
+									"StorageAccount": {
+										"value": "@pipeline().parameters.StorageAccount",
+										"type": "Expression"
+									},
+									"SourceContainer": {
+										"value": "@pipeline().parameters.SourceContainer",
+										"type": "Expression"
+									},
+									"ParentFolder": {
+										"value": "@pipeline().parameters.ParentFolder",
+										"type": "Expression"
+									},
+									"TableName": {
+										"value": "@pipeline().parameters.TableName",
+										"type": "Expression"
+									},
+									"ObjectSchema": {
+										"value": "@item().ObjectSchema",
+										"type": "Expression"
+									},
+									"ObjectName": {
+										"value": "@item().ObjectName",
+										"type": "Expression"
+									},
+									"FolderPattern": {
+										"value": "@item().FolderPattern",
+										"type": "Expression"
+									}
+								}
+							}
+						}
+					]
+				}
+			}
+		],
+		"parameters": {
+			"StorageAccount": {
+				"type": "string",
+				"defaultValue": "https://datasvcmodevadls.dfs.core.windows.net/"
+			},
+			"SourceContainer": {
+				"type": "string",
+				"defaultValue": "landingzone"
+			},
+			"ParentFolder": {
+				"type": "string",
+				"defaultValue": "topics"
+			},
+			"TableName": {
+				"type": "string",
+				"defaultValue": "tblFileNames"
+			},
+			"LoadGroup": {
+				"type": "string",
+				"defaultValue": "1"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2026-03-15T11:49:32Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

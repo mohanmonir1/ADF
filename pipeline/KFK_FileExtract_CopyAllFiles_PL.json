@@ -1,0 +1,393 @@
+{
+	"name": "KFK_FileExtract_CopyAllFiles_PL",
+	"properties": {
+		"activities": [
+			{
+				"name": "LookupOldWaterMark",
+				"description": "Calls a stored proc to get the watermark in the state tables.",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.00:30:00",
+					"retry": 2,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderStoredProcedureName": "[state].[GetObject]",
+						"storedProcedureParameters": {
+							"databaseName": {
+								"type": "String",
+								"value": {
+									"value": "@pipeline().parameters.SourceContainer",
+									"type": "Expression"
+								}
+							},
+							"objectName": {
+								"type": "String",
+								"value": {
+									"value": "@pipeline().parameters.ObjectName",
+									"type": "Expression"
+								}
+							},
+							"objectSchema": {
+								"type": "String",
+								"value": {
+									"value": "@pipeline().parameters.ObjectSchema",
+									"type": "Expression"
+								}
+							},
+							"serverName": {
+								"type": "String",
+								"value": {
+									"value": "@pipeline().parameters.StorageAccount",
+									"type": "Expression"
+								}
+							}
+						},
+						"queryTimeout": "00:30:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "DS_AzSQLDB_StateDB",
+						"type": "DatasetReference"
+					}
+				}
+			},
+			{
+				"name": "Set TableObjectName",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "LookupOldWaterMark",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "TblObjectName",
+					"value": {
+						"value": "@{if(equals(pipeline().parameters.FolderPattern,'GG'),concat(activity('LookupOldWaterMark').output.firstRow.ObjectSchema,'_GG_',pipeline().parameters.ObjectName,'_AVRO'),concat('ADLS_',pipeline().parameters.ObjectName,'_EVENTS_AVRO_FS'))}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Set FolderPath",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "Set TableObjectName",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "FolderPath",
+					"value": {
+						"value": "@{concat(pipeline().parameters.ParentFolder,'/',variables('TblObjectName'))}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Get File List",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "Set FolderPath",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"pipeline": {
+						"referenceName": "ADLS_Get_File_List",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true,
+					"parameters": {
+						"SourceDirectory": {
+							"value": "@variables('FolderPath')",
+							"type": "Expression"
+						},
+						"SourceContainer": {
+							"value": "@pipeline().parameters.SourceContainer",
+							"type": "Expression"
+						},
+						"TargetTable": {
+							"value": "@pipeline().parameters.TableName",
+							"type": "Expression"
+						},
+						"TargetSchema": "temp"
+					}
+				}
+			},
+			{
+				"name": "LookupFileNames",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Get File List",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "WITH CTE AS\n(\nSELECT IsDirectory, [name],RIGHT([name], CHARINDEX('/', REVERSE([name]))-1) as [FileName]\n,LEFT([name], LEN([name]) - CHARINDEX('/', REVERSE([name]))) as FolderPath\nfrom [temp].[tblFileNames]\nWHERE isDirectory IS NULL AND [contentlength] > 0\nAND [lastmodified] >= DATEADD(dd,-7,GETDATE())\nAND [lastmodified] <= DATEADD(MINUTE,-30, GETDATE())\nAND name like '%@{variables('TblObjectName')}%'\n)\n, CTE1 as\n(\nSELECT CTE.*, CASE WHEN ext.ExtractId IS NULL THEN 0 ELSE 1 END AS IsExtracted FROM CTE LEFT JOIN \nstate.ObjectExtract ext ON ext.ObjectId=@{activity('LookupOldWaterMark').output.firstRow.ObjectId} AND ext.FileDrop LIKE '%' + CTE.[FileName] and ext.ExtractionSuccess <> 0\n)\nSELECT * FROM CTE1 WHERE IsExtracted = 0",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "DS_AzSQLDB_REST",
+						"type": "DatasetReference",
+						"parameters": {
+							"SchemaName": "temp",
+							"TableName": {
+								"value": "@pipeline().parameters.TableName",
+								"type": "Expression"
+							}
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "ForEach",
+				"description": "Only files will be selected, the source-folders will not be selected.",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "LookupFileNames",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('LookupFileNames').output.value",
+						"type": "Expression"
+					},
+					"activities": [
+						{
+							"name": "RecordStartOfCopy",
+							"type": "Lookup",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureSqlSource",
+									"sqlReaderQuery": {
+										"value": "EXEC [state].[AddUpdateObjectExtractStatus] @databaseID = @{activity('LookupOldWaterMark').OUTPUT.firstRow.DatabaseId},\n\t@objectId = @{activity('LookupOldWaterMark').OUTPUT.firstRow.ObjectId},\n\t@dataFactoryRunId = '@{pipeline().RunId}',\n\t@newWaterMarkDate = NULL,\n\t@newWaterMarkId = NULL,\n\t@startTime = '@{trigger().startTime}',\n\t@endTime = NULL,\n\t@extractionSuccess = NULL,\n\t@folderDrop = '/raw/@{activity('LookupOldWaterMark').output.firstRow.ShortName}/@{pipeline().parameters.ObjectName}/@{formatdatetime(trigger().startTime, ' yyyy ')}/@{formatdatetime(trigger().startTime, ' MM ')}/@{formatdatetime(trigger().startTime, ' dd ')}/',\n\t@fileDrop = '@{item().FileName}'",
+										"type": "Expression"
+									},
+									"queryTimeout": "02:00:00",
+									"partitionOption": "None"
+								},
+								"dataset": {
+									"referenceName": "DS_AzSQLDB_StateDB",
+									"type": "DatasetReference"
+								}
+							}
+						},
+						{
+							"name": "CopyFromFile",
+							"type": "Copy",
+							"dependsOn": [
+								{
+									"activity": "RecordStartOfCopy",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AvroSource",
+									"storeSettings": {
+										"type": "AzureBlobFSReadSettings",
+										"recursive": false,
+										"enablePartitionDiscovery": false
+									}
+								},
+								"sink": {
+									"type": "AvroSink",
+									"storeSettings": {
+										"type": "AzureBlobFSWriteSettings"
+									},
+									"formatSettings": {
+										"type": "AvroWriteSettings"
+									}
+								},
+								"enableStaging": false,
+								"translator": {
+									"type": "TabularTranslator",
+									"typeConversion": true,
+									"typeConversionSettings": {
+										"allowDataTruncation": true,
+										"treatBooleanAsNumber": false
+									}
+								}
+							},
+							"inputs": [
+								{
+									"referenceName": "DS_ADLS_LandingZone_File",
+									"type": "DatasetReference",
+									"parameters": {
+										"FolderPath": "@{item().FolderPath}",
+										"FileName": "@{item().FileName}"
+									}
+								}
+							],
+							"outputs": [
+								{
+									"referenceName": "DS_ADLS_Raw_AVRO_File",
+									"type": "DatasetReference",
+									"parameters": {
+										"FolderPath": {
+											"value": "/@{activity('LookupOldWaterMark').output.firstRow.ShortName}/@{pipeline().parameters.ObjectName}/@{formatdatetime(trigger().startTime, 'yyyy')}/@{formatdatetime(trigger().startTime, 'MM')}/@{formatdatetime(trigger().startTime, 'dd')}",
+											"type": "Expression"
+										},
+										"FileName": {
+											"value": "@{item().FileName}",
+											"type": "Expression"
+										}
+									}
+								}
+							]
+						},
+						{
+							"name": "RecordEndOfCopy_Success",
+							"description": "Fires SPROC to update state tables to indicate the success of a copy.",
+							"type": "Lookup",
+							"dependsOn": [
+								{
+									"activity": "CopyFromFile",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureSqlSource",
+									"sqlReaderQuery": {
+										"value": "EXEC [state].[AddUpdateObjectExtractStatus] @databaseID = @{activity('LookupOldWaterMark').OUTPUT.firstRow.DatabaseId},\n\t@objectId = @{activity('LookupOldWaterMark').OUTPUT.firstRow.ObjectId},\n\t@dataFactoryRunId = '@{pipeline().RunId}',\n\t@newWaterMarkDate = NULL,\n\t@newWaterMarkId = NULL,\n\t@startTime = '@{trigger().startTime}',\n\t@endTime = '@{utcnow()}',\n\t@extractionSuccess = 1,\n\t@folderDrop = '/raw/@{activity('LookupOldWaterMark').output.firstRow.ShortName}/@{pipeline().parameters.ObjectName}/@{formatdatetime(trigger().startTime, ' yyyy ')}/@{formatdatetime(trigger().startTime, ' MM ')}/@{formatdatetime(trigger().startTime, ' dd ')}/',\n\t@fileDrop = '@{item().FileName}'",
+										"type": "Expression"
+									},
+									"queryTimeout": "02:00:00",
+									"partitionOption": "None"
+								},
+								"dataset": {
+									"referenceName": "DS_AzSQLDB_StateDB",
+									"type": "DatasetReference"
+								}
+							}
+						}
+					]
+				}
+			}
+		],
+		"parameters": {
+			"StorageAccount": {
+				"type": "string",
+				"defaultValue": "https://datasvcmodevadls.dfs.core.windows.net/"
+			},
+			"SourceContainer": {
+				"type": "string",
+				"defaultValue": "landingzone"
+			},
+			"ParentFolder": {
+				"type": "string",
+				"defaultValue": "topics"
+			},
+			"TableName": {
+				"type": "string",
+				"defaultValue": "tblFileNames"
+			},
+			"ObjectSchema": {
+				"type": "string",
+				"defaultValue": "PIM"
+			},
+			"ObjectName": {
+				"type": "string",
+				"defaultValue": "ITEM_CATEGORY"
+			},
+			"FolderPattern": {
+				"type": "string",
+				"defaultValue": "GG"
+			}
+		},
+		"variables": {
+			"FolderPath": {
+				"type": "String"
+			},
+			"TblObjectName": {
+				"type": "String"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2026-03-15T13:04:07Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

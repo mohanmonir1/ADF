@@ -1,0 +1,11 @@
+{
+	"name": "LS_ADLS_CostSavings_ADLS_01",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"annotations": [],
+		"type": "AzureBlobFS",
+		"typeProperties": {
+			"url": "https://datasvcmodevadls.dfs.core.windows.net/"
+		}
+	}
+}

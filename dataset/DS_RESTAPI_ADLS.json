@@ -1,0 +1,30 @@
+{
+	"name": "DS_RESTAPI_ADLS",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "LS_RESTAPI_ADLS",
+			"type": "LinkedServiceReference"
+		},
+		"parameters": {
+			"Directory": {
+				"type": "string"
+			},
+			"SourceContainer": {
+				"type": "string"
+			},
+			"Continuation": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "RestResource",
+		"typeProperties": {
+			"relativeUrl": {
+				"value": "/@{dataset().SourceContainer}?directory=@{dataset().Directory}@{if(not(empty(dataset().Continuation)),concat('&continuation=',dataset().Continuation),'')}&recursive=true&resource=filesystem",
+				"type": "Expression"
+			}
+		},
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

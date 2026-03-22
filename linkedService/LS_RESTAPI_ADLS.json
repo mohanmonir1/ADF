@@ -1,0 +1,14 @@
+{
+	"name": "LS_RESTAPI_ADLS",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"annotations": [],
+		"type": "RestService",
+		"typeProperties": {
+			"url": "https://datasvcmodevadls.dfs.core.windows.net/",
+			"enableServerCertificateValidation": true,
+			"authenticationType": "ManagedServiceIdentity",
+			"aadResourceId": "https://storage.azure.com"
+		}
+	}
+}

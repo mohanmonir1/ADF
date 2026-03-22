@@ -1,0 +1,13 @@
+{
+	"name": "DS_AzSQLDB_StateDB",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "LS_AzSQLDB_CostSavings_DB_01",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "AzureSqlTable",
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

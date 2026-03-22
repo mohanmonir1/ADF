@@ -1,0 +1,25 @@
+{
+	"name": "LS_AzSQLDB_CostSavings_DB_01",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"annotations": [],
+		"type": "AzureSqlDatabase",
+		"typeProperties": {
+			"server": "datasvc-dev-server.database.windows.net",
+			"database": "datasvc-dev-db",
+			"encrypt": "mandatory",
+			"trustServerCertificate": false,
+			"authenticationType": "SQL",
+			"userName": "te",
+			"password": {
+				"type": "AzureKeyVaultSecret",
+				"store": {
+					"referenceName": "AzureKeyVault",
+					"type": "LinkedServiceReference"
+				},
+				"secretName": "AzureKeyVault",
+				"secretVersion": "25c2ee9cbae9484b91d38c8ed0f4d83f"
+			}
+		}
+	}
+}
